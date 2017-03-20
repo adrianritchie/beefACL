@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 #include "ESP8266WiFi.h"
 #include "ESP8266HTTPClient.h"
 #include "SPI.h"
@@ -50,22 +52,22 @@ void setup() {
   // Switch Relay state to LOW
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, relayState);
-  
+
   Serial.begin(9600);
   delay(250);
   Serial.println(F("Booting...."));
-  
+
   SPI.begin();
   mfrc522.PCD_Init();
-  
+
   // We start by connecting to a WiFi network
   Serial.print("Attempting to connect to network '");
   Serial.print(ssid);
   Serial.println("'.");
-  
+
   WiFi.begin(ssid, password);
   int wifiRetries = 0;
-  
+
   while (WiFi.status() != WL_CONNECTED && wifiRetries < 20) {
     delay(500);
     Serial.print(".");
@@ -82,7 +84,7 @@ void setup() {
     Serial.println("MAC address: ");
     Serial.println(WiFi.macAddress());
   }
-  
+
   Serial.println("Mounting File System...");
 
   if (!SPIFFS.begin()) {
@@ -99,30 +101,30 @@ void setup() {
   } else {
     Serial.println("ACL loaded from flash memory. " + String(aclInterval / 1000) + " seconds until next update.");
   }
-  
+
   Serial.println(F("Ready!"));
   Serial.println(F("======================================================"));
 }
 
 void loop() {
-  
+
   unsigned long currentAclMillis = millis();
-  
+
   // Time for an ACL Update, do we have WiFi?
   if((currentAclMillis - previousAclMillis >= aclInterval) && (WiFi.status() == WL_CONNECTED)) {
     previousAclMillis = currentAclMillis;
-    
+
     Serial.println("UPDATING USERS");
     getUsers();
   }
 
   // TODO IF MAINTENANCE LOCKOUT / UNLOCK
-  
+
   unsigned long currentReadMillis = millis();
-  
+
   if(currentReadMillis - previousReadMillis >= readInterval) {
     previousReadMillis = currentReadMillis;
-    
+
     //Serial.println("CARD CHECK");
 
     authenticated = false;
@@ -131,24 +133,24 @@ void loop() {
     // Look for new cards
     if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
       // Show some details of the PICC (that is: the tag/card)
-      Serial.print("Card UID:");    
+      Serial.print("Card UID:");
       char cardUID[64] = { 0 };
-      
+
       for(uint16_t i = 0; i < mfrc522.uid.size; i++) {
           char hBuff[2] { 0 };
           sprintf(hBuff, "%02x", mfrc522.uid.uidByte[i]);
           strcat(cardUID, hBuff);
       }
-      
+
       for( int i=0 ; i < strlen(cardUID) ; ++i ) cardUID[i] = toupper( cardUID[i] ) ;
-      
+
       Serial.println(cardUID);
-      
+
       if ( authCard(cardUID) ) {
         // if authed set HIGH
         relayState = HIGH;
         previousRelayMillis = millis(); // Reset the relay timeout to "de-bounce" the card detection.
-      
+
         if (digitalRead(RELAY_PIN) != relayState) {
           digitalWrite(RELAY_PIN, relayState);
         }
@@ -156,19 +158,19 @@ void loop() {
         relayState = LOW;
         digitalWrite(RELAY_PIN, relayState);
       }
-      
+
       return;
     }
   }
-  
+
   unsigned long currentRelayMillis = millis();
-  
+
   // Time for an ACL Update, do we have WiFi?
   if((currentRelayMillis - previousRelayMillis >= relayInterval)) {
     previousRelayMillis = currentRelayMillis;
-    
+
     Serial.println("RELAY TIME OUT");
-    
+
     if (digitalRead(RELAY_PIN) != relayState) {
       digitalWrite(RELAY_PIN, relayState);
     }
@@ -176,16 +178,16 @@ void loop() {
 }
 
 bool getUsers() {
-  
+
   HTTPClient http;
-  
+
   // configure server and url
   http.begin("http://boudlo.gg/access.php");
-  
+
   int httpCode = http.GET();
-  
+
   if(httpCode == HTTP_CODE_OK) {
-    
+
     // Delete any failed files if they exist.
     if ( SPIFFS.exists("/new.acl") ) { SPIFFS.remove("/new.acl"); }
     if ( SPIFFS.exists("/authList.new") ) { SPIFFS.remove("/authList.new"); }
@@ -196,7 +198,7 @@ bool getUsers() {
     int fileQCStatus = 0;
     File newAcl = SPIFFS.open("/next.acl", "w");
     File newAuthList = SPIFFS.open("/authList.new", "w");
-    
+
     // read all data from server
     while(http.connected()) {
       // get available data size
@@ -204,12 +206,12 @@ bool getUsers() {
 
       // create buffer for read
       char buff[256] = { 0 };
-      
-      /* 
-       * WARNING - Lines in the delimited file should not be longer 
+
+      /*
+       * WARNING - Lines in the delimited file should not be longer
        * than this, if they are, increase the size of buff.
        */
-      
+
       char uid[21] = { 0 };
       char nickname[65] = { 0 };
       char accessBits[65] = { 0 };
@@ -220,37 +222,37 @@ bool getUsers() {
       if(size) {
         // read up to the first newline char or 256 bytes
         int c = stream->readBytesUntil('\n', buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
-        
+
         if(strcmp(buff, usersBof) == 0) {
           fileQCStatus = 1;
           newAcl.println(usersBof);
           continue;
         }
-        
+
         if( strcmp(buff, usersEof) == 0 && fileQCStatus == 1) {
           fileQCStatus = 2;
           newAcl.println(usersEof);
           break;
         }
-        
+
         // Ignore shorter/empty lines
         if( c >= 7 ) {
           char * pch;
           pch = strchr(buff, '|');
           int lastpos = pch-buff+1;
           strncpy(uid, buff, pch-buff);
-          
+
           pch = strchr(pch+1,'|');
           strncpy(nickname, pch-(pch-buff-lastpos), pch-buff-lastpos);
           lastpos = pch-buff+1;
 
           pch = strchr(pch+1,'|');
           strncpy(accessBits, pch-(pch-buff-lastpos), pch-buff-lastpos);
-          
+
           lastpos = pch-buff+1;
           int sha1Len = strlen(pch-(pch-buff-lastpos));
           strncpy(theirHash, pch-(pch-buff-lastpos), sha1Len);
-          
+
           strcat(toHash, uid);
           strcat(toHash, nickname);
           strcat(toHash, accessBits);
@@ -258,7 +260,7 @@ bool getUsers() {
 
           sha1(toHash, &hash[0]);
           char ourHash[41] { 0 };
-          
+
           for(uint16_t i = 0; i < 20; i++) {
               char hBuff[2] { 0 };
               sprintf(hBuff, "%02x", hash[i]);
@@ -274,9 +276,9 @@ bool getUsers() {
           Serial.println(buff);
           newAcl.println(buff);
 
-          int bint = atoi(accessBits); 
+          int bint = atoi(accessBits);
           int comp = bint & accessBit; // Access may be set by more than one bit
-          
+
           if(comp == accessBit) {
             newAuthList.println(uid);
           }
@@ -287,30 +289,30 @@ bool getUsers() {
     if(fileQCStatus == 2) {
       // The ol' switcharoo
       SPIFFS.remove("/previous.acl");
-      
+
       if ( SPIFFS.exists("/current.acl") ) {
         SPIFFS.rename("/current.acl", "/previous.acl");
       }
-      
+
       SPIFFS.rename("/next.acl", "/current.acl");
       Serial.println("Validated and stored new ACL.");
 
       SPIFFS.remove("/authList.prev");
-      
+
       if ( SPIFFS.exists("/authList") ) {
         SPIFFS.rename("/authList", "/authList.prev");
       }
-      
+
       SPIFFS.rename("/authList.new", "/authList");
     }
-    
+
     newAcl.close();
     newAuthList.close();
   } else {
     Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
     return false;
   }
-  
+
   http.end();
   return true;
 }
@@ -327,12 +329,12 @@ bool loadACL() {
     Serial.println("ACL file size is too large.");
     return false;
   }
-  
+
   return true;
 }
 
 bool authCard(char* cardUID) {
-  
+
   File authFile = SPIFFS.open("/authList", "r");
   if (!authFile) { Serial.println("Failed to open ACL file."); return false; }
   int len = authFile.size();
@@ -348,7 +350,7 @@ bool authCard(char* cardUID) {
       authFile.close();
       return true;
     }
-    
+
     len -= c+1; // add one for the newline.
   }
 
@@ -356,5 +358,3 @@ bool authCard(char* cardUID) {
   Serial.println("Not Authorised.");
   return false;
 }
-
-
