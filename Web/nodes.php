@@ -6,4 +6,4 @@ $nodes = [
             'access' => SAFETY_MACHINING | TOOL_MILL
             // You need to have done the Machining Safety and have mill-access
         ],
-    ]
+    ];
