@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include "ESP8266WiFi.h"
+#include <WiFiManager.h>
 #include "ESP8266HTTPClient.h"
 #include "SPI.h"
 #include "MFRC522.h"
@@ -21,8 +22,6 @@ GND     = GND
 #define SS_PIN	4  // D2 (GPIO4)
 #define RELAY_PIN 5 // D1 (GPIO5) 5 is safe for the relay as it is held low on boot / flash
 
-const char* ssid = "Digital GH Guest";
-const char* password = "dgguest1";
 const char *hashPsk = "SOME RANDOM CHARS";
 const int accessBit = 4;
 
@@ -35,6 +34,9 @@ const char *nodesBof = "NODES_BOF";
 const char *nodesEof = "NODES_EOF";
 
 MFRC522 mfrc522(SS_PIN, RST_PIN);	// Create MFRC522 instance
+
+WiFiManager wifiManager;
+int wifiConnectCount = 0;
 
 int relayState = LOW;
 bool authenticated = false;
@@ -60,36 +62,14 @@ void setup() {
   SPI.begin();
   mfrc522.PCD_Init();
 
-  // We start by connecting to a WiFi network
-  Serial.print("Attempting to connect to network '");
-  Serial.print(ssid);
-  Serial.println("'.");
-
-  WiFi.begin(ssid, password);
-  int wifiRetries = 0;
-
-  while (WiFi.status() != WL_CONNECTED && wifiRetries < 20) {
-    delay(500);
-    Serial.print(".");
-    wifiRetries++;
-  }
-
-  if ( WiFi.status() != WL_CONNECTED ) {
-    Serial.println("Unable to connect.");
-    // TODO: Mesh Networking here?
-  } else {
-    Serial.println("WiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-    Serial.println("MAC address: ");
-    Serial.println(WiFi.macAddress());
-  }
+  startWIFI();
 
   Serial.println("Mounting File System...");
 
   if (!SPIFFS.begin()) {
     Serial.println("Failed to mount File System.");
-  } else {
+  }
+  else {
     Serial.println("File system mounted. Looking for existing ACL...");
   }
 
@@ -98,7 +78,8 @@ void setup() {
     if(!getUsers()) {
       Serial.println("Failed to retrieve ACL file. Will retry in " + String(aclInterval / 1000) + " seconds");
     }
-  } else {
+  }
+  else {
     Serial.println("ACL loaded from flash memory. " + String(aclInterval / 1000) + " seconds until next update.");
   }
 
@@ -107,15 +88,20 @@ void setup() {
 }
 
 void loop() {
-
   unsigned long currentAclMillis = millis();
 
   // Time for an ACL Update, do we have WiFi?
-  if((currentAclMillis - previousAclMillis >= aclInterval) && (WiFi.status() == WL_CONNECTED)) {
-    previousAclMillis = currentAclMillis;
+  if((currentAclMillis - previousAclMillis >= aclInterval)) {
+    if (WiFi.status() == WL_CONNECTED) {
+      previousAclMillis = currentAclMillis;
 
-    Serial.println("UPDATING USERS");
-    getUsers();
+      Serial.println("UPDATING USERS");
+      getUsers();
+    }
+    else {
+	    startWIFI();
+	    return;
+    }
   }
 
   // TODO IF MAINTENANCE LOCKOUT / UNLOCK
@@ -175,6 +161,24 @@ void loop() {
       digitalWrite(RELAY_PIN, relayState);
     }
   }
+}
+
+void startWIFI() {
+	if (WiFi.status() != WL_CONNECTED) {
+		wifiManager.autoConnect("gringod-wifi-8266");
+
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.print(".");
+        delay(500);
+    }
+    Serial.println("WiFi connected");
+
+    // Print the IP address
+    Serial.print("ESP8266 IP: ");
+    Serial.println(WiFi.localIP());
+
+		wifiConnectCount++;
+	}
 }
 
 bool getUsers() {
