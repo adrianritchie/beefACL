@@ -93,46 +93,16 @@ const CONFIG_MESH_NETWORK = 4;
 const PSK = "SOME RANDOM CHARS";
 // Basically a salt to allow the node to verify that we're genuine.
 
+require_once('users.php');
+require_once('nodes.php');
+
 // We'll just use some multi-dimensional arrays instead of a db for testing
 $lists = [
-    'users' => [
-        [
-            'card_uid' => '04073812524680',
-            'name' => 'Jim',
-            'access' => DOOR_FRONT | SAFETY_BASIC | SAFETY_LASER | TOOL_LASER
-        ],
-        [
-            'card_uid' => 'C41103C5',
-            'name' => 'Marcel',
-            'access' => DOOR_FRONT | DOOR_ADMIN | SAFETY_BASIC | TOOL_FDMPRINTER
-        ],
-        [
-            'card_uid' => '7427C14D',
-            'name' => 'Adrian',
-            'access' => DOOR_FRONT | DOOR_STORES | SAFETY_BASIC | SAFETY_MACHINING | TOOL_LATHE | TOOL_FDMPRINTER
-        ],
-        [
-            'card_uid' => '565FCE93',
-            'name' => 'MAINTENANCE LOCKOUT',
-            'access' => RESERVED_LOCKOUT
-        ],
-        [
-            'card_uid' => '34CEC34D',
-            'name' => 'MAINTENANCE UNLOCK',
-            'access' => RESERVED_UNLOCK
-        ],
-    ],
+    'users' => $users,
 
     // Work in progress, nodes can ask for config updates. Need more nodes
     // so I can develop this more properly
-    'nodes' => [
-        [
-            'mac_addr' => '60:01:94:17:8E:6B',
-            'name' => 'Mill 1 Men\'s Shed',
-            'access' => SAFETY_MACHINING | TOOL_MILL
-            // You need to have done the Machining Safety and have mill-access
-        ],
-    ],
+    'nodes' => $nodes,
 ];
 
 // Default users list
@@ -144,16 +114,7 @@ if( isset($_REQUEST['list']) && array_key_exists($_REQUEST['list'], $lists)) {
 
 $lines = [];
 
-// helper function to remove pipes, just in case
-function p(String $string) {
-    return str_replace( '|', '', $string );
-}
+$data['data'] = json_encode($lists[$list]);
+$data['hash'] = sha1($data['data'] . PSK);
 
-foreach( $lists[$list] as $id => $details ) {
-    $details['hash'] = sha1(implode($details) . PSK);
-    $lines[] = implode(array_map('p', $details), '|');
-}
-
-echo strtoupper($list) . "_BOF\n";
-echo implode($lines, "\n");
-echo "\n" . strtoupper($list) . "_EOF\n";
+echo json_encode($data);
